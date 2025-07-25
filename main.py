@@ -1,29 +1,32 @@
 # -------------------------------
-# ✅ INSTALL DEPENDENCIES:
-# pip install yfinance pandas pandas_ta flask requests
+# ✅ INSTALL DEPENDENCIES FIRST:
+# Replit Shell → pip install yfinance pandas_ta flask
 # -------------------------------
 
 import yfinance as yf
 import pandas as pd
 import pandas_ta as ta
 import time
-import threading
 import requests
+import threading
 from flask import Flask
 
 # -------------------------------
-# 🔐 TELEGRAM CONFIG
+# 🔐 TELEGRAM BOT CONFIG
 # -------------------------------
 bot_token = "8156823863:AAGp63jn7s3gMyQGwTGnDQh235OqpJVRAhU"
 chat_id = "6510634018"
 
+# -------------------------------
+# 📤 SEND ALERT TO TELEGRAM
+# -------------------------------
 def send_alert(msg):
     url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
-    data = {"chat_id": chat_id, "text": msg, "parse_mode": "Markdown"}
-    requests.post(url, data=data)
+    payload = {"chat_id": chat_id, "text": msg, "parse_mode": "Markdown"}
+    requests.post(url, data=payload)
 
 # -------------------------------
-# 📊 ENGULFING CANDLE STRATEGY
+# 📊 ENGULFING CANDLE LOGIC
 # -------------------------------
 def is_bullish_engulfing(curr, prev):
     return (
@@ -42,82 +45,87 @@ def is_bearish_engulfing(curr, prev):
     )
 
 # -------------------------------
-# 🤖 MAIN BOT LOOP
+# 🤖 SCALPING BOT FUNCTION
 # -------------------------------
 def run_bot():
-    print("✅ Bot started...")
+    send_alert("✅ Bot started and connected to Telegram!")
+
+    print("✅ Bot running 24/7...")
+
     while True:
         try:
-            df = yf.download("XAUUSD=X", interval="5m", period="1d")
-            df.ta.ema(length=9, append=True)
-            df.ta.ema(length=21, append=True)
-            df.ta.macd(append=True)
-            df.ta.rsi(length=14, append=True)
-            df.ta.atr(length=14, append=True)
-            df["Volume"] = df["Volume"].fillna(0)
+            # 📥 Download 5m data from Yahoo Finance
+            df_5m = yf.download("GC=F", interval="5m", period="1d")
+            df_5m.ta.ema(length=9, append=True)
+            df_5m.ta.ema(length=21, append=True)
+            df_5m.ta.rsi(length=14, append=True)
+            df_5m.ta.atr(length=14, append=True)
 
-            df15 = yf.download("XAUUSD=X", interval="15m", period="1d")
-            df15.ta.ema(length=50, append=True)
-            trend_15m = "Bullish" if df15["Close"].iloc[-1] > df15["EMA_50"].iloc[-1] else "Bearish"
+            # 📥 Download 15m data for trend direction
+            df_15m = yf.download("GC=F", interval="15m", period="1d")
+            df_15m.ta.ema(length=50, append=True)
+            trend_15m = "Bullish" if df_15m["EMA_50"].iloc[-1] < df_15m["Close"].iloc[-1] else "Bearish"
 
-            last = df.iloc[-1]
-            prev = df.iloc[-2]
+            # 🧪 Prepare data for signal detection
+            last = df_5m.iloc[-1]
+            prev = df_5m.iloc[-2]
 
             atr = round(last["ATR_14"], 2)
             rsi = round(last["RSI_14"], 2)
-            volume = int(last["Volume"])
 
-            if atr < 1.0 or volume < 100:
-                print("⚠️ ATR or Volume too low. Skipping.")
+            if atr < 1.0:
+                print("📉 ATR too low, skipping signal.")
                 time.sleep(300)
                 continue
 
             message = None
 
-            # BUY SIGNAL
+            # 🟢 BUY Signal
             if (
                 last["EMA_9"] > last["EMA_21"] and
-                last["MACDh_12_26_9"] > 0 and
                 rsi > 50 and
-                is_bullish_engulfing(last, prev)
+                is_bullish_engulfing(last, prev) and
+                last["Close"] > prev["High"]
             ):
                 entry = round(last["Close"], 2)
                 sl = round(last["Low"] - 1.5, 2)
                 tp = round(entry + (entry - sl) * 1.5, 2)
                 message = (
-                    f"🟢 BUY Signal on XAU/USD (5m)\n"
+                    f"🟢 BUY Signal on GC=F (Gold Futures, 5m)\n"
                     f"📈 Entry: {entry}\n🛑 SL: {sl} | 🎯 TP: {tp}\n"
-                    f"📊 RSI: {rsi}, ATR: {atr}, Vol: {volume}\n"
-                    f"📌 Trend: {trend_15m}"
+                    f"✅ Bullish Engulfing Confirmed\n"
+                    f"📊 RSI: {rsi} | ATR: {atr}\n"
+                    f"⚠️ 15m Trend: {trend_15m}"
                 )
 
-            # SELL SIGNAL
+            # 🔴 SELL Signal
             elif (
                 last["EMA_9"] < last["EMA_21"] and
-                last["MACDh_12_26_9"] < 0 and
                 rsi < 50 and
-                is_bearish_engulfing(last, prev)
+                is_bearish_engulfing(last, prev) and
+                last["Close"] < prev["Low"]
             ):
                 entry = round(last["Close"], 2)
                 sl = round(last["High"] + 1.5, 2)
                 tp = round(entry - (sl - entry) * 1.5, 2)
                 message = (
-                    f"🔴 SELL Signal on XAU/USD (5m)\n"
+                    f"🔴 SELL Signal on GC=F (Gold Futures, 5m)\n"
                     f"📉 Entry: {entry}\n🛑 SL: {sl} | 🎯 TP: {tp}\n"
-                    f"📊 RSI: {rsi}, ATR: {atr}, Vol: {volume}\n"
-                    f"📌 Trend: {trend_15m}"
+                    f"✅ Bearish Engulfing Confirmed\n"
+                    f"📊 RSI: {rsi} | ATR: {atr}\n"
+                    f"⚠️ 15m Trend: {trend_15m}"
                 )
 
             if message:
                 send_alert(message)
-                print("✅ Signal sent to Telegram.")
+                print("✅ Signal sent to Telegram!")
             else:
-                print("🔍 No valid signal at this time.")
+                print("🔍 No valid signal found.")
 
         except Exception as e:
             print(f"❌ Error: {e}")
 
-        time.sleep(300)
+        time.sleep(300)  # Wait 5 minutes before the next check
 
 # -------------------------------
 # 🌐 FLASK KEEP-ALIVE SERVER
@@ -126,10 +134,13 @@ app = Flask('')
 
 @app.route('/')
 def home():
-    return "✅ XAU Scalping Bot is running!"
+    return "✅ Scalping Bot is Running (Ping OK)"
 
 def run_web():
     app.run(host='0.0.0.0', port=8080)
 
+# -------------------------------
+# 🧵 RUN WEB + BOT THREADS
+# -------------------------------
 threading.Thread(target=run_web).start()
 threading.Thread(target=run_bot).start()
